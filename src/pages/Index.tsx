@@ -234,6 +234,45 @@ function Dashboard({ outdoor, indoor }: { outdoor: OutdoorUnit[]; indoor: Indoor
   );
 }
 
+// ─── Temp Editor ─────────────────────────────────────────
+function TempEditor({ value, onChange, disabled }: { value: number; onChange: (v: number) => void; disabled?: boolean }) {
+  const [editing, setEditing] = useState(false);
+
+  if (disabled) return <span className="font-mono text-sm text-dim">{value}°C</span>;
+
+  if (!editing) {
+    return (
+      <button
+        onClick={() => setEditing(true)}
+        title="Нажмите чтобы изменить уставку"
+        className="font-mono text-sm text-blue hover:text-cyan border-b border-dashed border-blue-500/40 hover:border-cyan-400 transition-colors">
+        {value}°C
+      </button>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-0.5 animate-fade-in">
+      <button
+        onClick={() => { if (value > 16) onChange(value - 1); }}
+        className="w-6 h-6 rounded surface-3 text-secondary-color hover:text-primary-color flex items-center justify-center text-sm leading-none transition-colors">
+        −
+      </button>
+      <span className="font-mono text-sm text-blue w-10 text-center">{value}°C</span>
+      <button
+        onClick={() => { if (value < 30) onChange(value + 1); }}
+        className="w-6 h-6 rounded surface-3 text-secondary-color hover:text-primary-color flex items-center justify-center text-sm leading-none transition-colors">
+        +
+      </button>
+      <button
+        onClick={() => setEditing(false)}
+        className="ml-1 w-5 h-5 rounded text-dim hover:text-green flex items-center justify-center transition-colors">
+        <Icon name="Check" size={11} fallback="Check" />
+      </button>
+    </div>
+  );
+}
+
 // ─── Toggle Switch ────────────────────────────────────────
 function ToggleSwitch({ on, disabled, onChange }: { on: boolean; disabled?: boolean; onChange: () => void }) {
   return (
@@ -257,6 +296,7 @@ function DeviceTracking({
   toggleOutdoor, toggleIndoor,
   allOutdoorOn, allIndoorOn,
   setAllOutdoor, setAllIndoor,
+  setIndoorTemp,
 }: {
   outdoor: OutdoorUnit[];
   indoor: IndoorUnit[];
@@ -266,6 +306,7 @@ function DeviceTracking({
   allIndoorOn: boolean;
   setAllOutdoor: (on: boolean) => void;
   setAllIndoor: (on: boolean) => void;
+  setIndoorTemp: (id: string, temp: number) => void;
 }) {
   const [tab, setTab] = useState<"outdoor" | "indoor">("outdoor");
   const ouOnline = outdoor.filter(u => u.status === "on").length;
@@ -345,7 +386,13 @@ function DeviceTracking({
                   <td className="px-4 py-3 font-medium">{u.name}</td>
                   <td className="px-4 py-3 text-secondary-color">{u.group}</td>
                   <td className="px-4 py-3 text-secondary-color">{u.mode}</td>
-                  <td className="px-4 py-3 font-mono text-sm text-blue">{u.setTemp}°C</td>
+                  <td className="px-4 py-3">
+                    <TempEditor
+                      value={u.setTemp}
+                      disabled={u.status === "error" || u.status === "off"}
+                      onChange={v => setIndoorTemp(u.id, v)}
+                    />
+                  </td>
                   <td className="px-4 py-3 font-mono text-sm">
                     <span className={Math.abs(u.curTemp - u.setTemp) > 2 ? "text-amber" : "text-green"}>{u.curTemp}°C</span>
                   </td>
@@ -919,6 +966,10 @@ export default function Index() {
     }));
   }, []);
 
+  const setIndoorTemp = useCallback((id: string, temp: number) => {
+    setIndoor(prev => prev.map(u => u.id === id ? { ...u, setTemp: temp } : u));
+  }, []);
+
   const allOutdoorOn = outdoor.filter(u => u.status !== "error").every(u => u.status === "on");
   const allIndoorOn = indoor.filter(u => u.status !== "error").every(u => u.status === "on");
   // ─────────────────────────────────────────────────────
@@ -944,6 +995,7 @@ export default function Index() {
           toggleOutdoor={toggleOutdoor} toggleIndoor={toggleIndoor}
           allOutdoorOn={allOutdoorOn} allIndoorOn={allIndoorOn}
           setAllOutdoor={setAllOutdoor} setAllIndoor={setAllIndoor}
+          setIndoorTemp={setIndoorTemp}
         />
       );
       if (activeScreen === "groups") return <GroupSettings />;

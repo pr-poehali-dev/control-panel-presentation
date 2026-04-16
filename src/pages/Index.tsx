@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import Icon from "@/components/ui/icon";
 
 // ─── Types ───────────────────────────────────────────────
@@ -70,8 +70,12 @@ const NAV = [
   },
 ];
 
-// ─── Mock data ────────────────────────────────────────────
-const OUTDOOR_UNITS = [
+// ─── Types ─────────────────────────────────────────────────
+type OutdoorUnit = { id: string; name: string; port: string; status: string; temp: number; mode: string };
+type IndoorUnit = { id: string; name: string; group: string; status: string; setTemp: number; curTemp: number; mode: string };
+
+// ─── Initial data ─────────────────────────────────────────
+const INIT_OUTDOOR: OutdoorUnit[] = [
   { id: "OU-01", name: "Нар. блок 1", port: "RS485-1", status: "on", temp: 38, mode: "Охлаждение" },
   { id: "OU-02", name: "Нар. блок 2", port: "RS485-1", status: "on", temp: 37, mode: "Охлаждение" },
   { id: "OU-03", name: "Нар. блок 3", port: "RS485-2", status: "warn", temp: 42, mode: "Охлаждение" },
@@ -80,7 +84,7 @@ const OUTDOOR_UNITS = [
   { id: "OU-06", name: "Нар. блок 6", port: "RS485-3", status: "error", temp: 0, mode: "Ошибка" },
 ];
 
-const INDOOR_UNITS = [
+const INIT_INDOOR: IndoorUnit[] = [
   { id: "IU-001", name: "Офис 101", group: "1 этаж", status: "on", setTemp: 22, curTemp: 23, mode: "Охл." },
   { id: "IU-002", name: "Офис 102", group: "1 этаж", status: "on", setTemp: 24, curTemp: 24, mode: "Охл." },
   { id: "IU-003", name: "Переговорная А", group: "1 этаж", status: "off", setTemp: 22, curTemp: 26, mode: "Стоп" },
@@ -125,9 +129,9 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 // ─── Dashboard ────────────────────────────────────────────
-function Dashboard() {
-  const onlineOU = OUTDOOR_UNITS.filter(u => u.status === "on").length;
-  const onlineIU = INDOOR_UNITS.filter(u => u.status === "on").length;
+function Dashboard({ outdoor, indoor }: { outdoor: OutdoorUnit[]; indoor: IndoorUnit[] }) {
+  const onlineOU = outdoor.filter(u => u.status === "on").length;
+  const onlineIU = indoor.filter(u => u.status === "on").length;
   const errCount = ERRORS.filter(e => e.level === "error").length;
   const warnCount = ERRORS.filter(e => e.level === "warn").length;
 
@@ -230,31 +234,81 @@ function Dashboard() {
   );
 }
 
+// ─── Toggle Switch ────────────────────────────────────────
+function ToggleSwitch({ on, disabled, onChange }: { on: boolean; disabled?: boolean; onChange: () => void }) {
+  return (
+    <button
+      onClick={onChange}
+      disabled={disabled}
+      title={on ? "Выключить" : "Включить"}
+      className={`relative w-11 h-6 rounded-full transition-colors duration-200 focus:outline-none
+        ${disabled ? "opacity-40 cursor-not-allowed" : "cursor-pointer"}
+        ${on ? "bg-blue-600" : "bg-surface-3 border border-border"}`}
+    >
+      <span className={`absolute top-0.5 w-5 h-5 rounded-full shadow transition-all duration-200
+        ${on ? "left-5 bg-white" : "left-0.5 bg-zinc-400"}`} />
+    </button>
+  );
+}
+
 // ─── Device Tracking ──────────────────────────────────────
-function DeviceTracking() {
+function DeviceTracking({
+  outdoor, indoor,
+  toggleOutdoor, toggleIndoor,
+  allOutdoorOn, allIndoorOn,
+  setAllOutdoor, setAllIndoor,
+}: {
+  outdoor: OutdoorUnit[];
+  indoor: IndoorUnit[];
+  toggleOutdoor: (id: string) => void;
+  toggleIndoor: (id: string) => void;
+  allOutdoorOn: boolean;
+  allIndoorOn: boolean;
+  setAllOutdoor: (on: boolean) => void;
+  setAllIndoor: (on: boolean) => void;
+}) {
   const [tab, setTab] = useState<"outdoor" | "indoor">("outdoor");
+  const ouOnline = outdoor.filter(u => u.status === "on").length;
+  const inOnline = indoor.filter(u => u.status === "on").length;
+
   return (
     <div className="animate-fade-in space-y-4">
-      <div className="flex gap-1 surface-2 rounded-lg p-1 w-fit">
-        {(["outdoor", "indoor"] as const).map(t => (
-          <button key={t} onClick={() => setTab(t)}
-            className={`px-4 py-1.5 rounded-md text-sm transition-all ${tab === t ? "surface-3 text-primary-color font-medium" : "text-secondary-color hover:text-primary-color"}`}>
-            {t === "outdoor" ? "Наружные блоки (192)" : "Внутренние блоки (384)"}
+      {/* Tab bar + bulk controls */}
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex gap-1 surface-2 rounded-lg p-1">
+          {(["outdoor", "indoor"] as const).map(t => (
+            <button key={t} onClick={() => setTab(t)}
+              className={`px-4 py-1.5 rounded-md text-sm transition-all ${tab === t ? "surface-3 text-primary-color font-medium" : "text-secondary-color hover:text-primary-color"}`}>
+              {t === "outdoor" ? `Наружные (${ouOnline}/${outdoor.length})` : `Внутренние (${inOnline}/${indoor.length})`}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => tab === "outdoor" ? setAllOutdoor(true) : setAllIndoor(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-green-500/15 text-green-400 border border-green-500/30 hover:bg-green-500/25 transition-all">
+            <Icon name="PowerCircle" size={13} fallback="Power" /> Включить все
           </button>
-        ))}
+          <button
+            onClick={() => tab === "outdoor" ? setAllOutdoor(false) : setAllIndoor(false)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-zinc-500/15 text-zinc-400 border border-zinc-500/30 hover:bg-zinc-500/25 transition-all">
+            <Icon name="PowerOff" size={13} fallback="Power" /> Выключить все
+          </button>
+        </div>
       </div>
+
       <div className="surface-1 rounded-lg panel-border overflow-hidden">
         {tab === "outdoor" ? (
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border text-xs text-dim uppercase tracking-wide">
-                {["ID","Название","Порт","Режим","Т° нагн.","Статус",""].map(h => (
+                {["ID","Название","Порт","Режим","Т° нагн.","Статус","Вкл/Выкл"].map(h => (
                   <th key={h} className="text-left px-4 py-3 font-medium">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {OUTDOOR_UNITS.map(u => (
+              {outdoor.map(u => (
                 <tr key={u.id} className="border-b border-border/40 hover:bg-surface-2 transition-colors">
                   <td className="px-4 py-3 font-mono text-xs text-dim">{u.id}</td>
                   <td className="px-4 py-3 font-medium">{u.name}</td>
@@ -264,7 +318,13 @@ function DeviceTracking() {
                     <span className={u.temp > 40 ? "text-amber" : "text-primary-color"}>{u.temp > 0 ? `${u.temp}°C` : "—"}</span>
                   </td>
                   <td className="px-4 py-3"><StatusBadge status={u.status} /></td>
-                  <td className="px-4 py-3"><button className="text-xs text-blue hover:underline">Изменить</button></td>
+                  <td className="px-4 py-3">
+                    <ToggleSwitch
+                      on={u.status === "on" || u.status === "warn"}
+                      disabled={u.status === "error"}
+                      onChange={() => toggleOutdoor(u.id)}
+                    />
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -273,13 +333,13 @@ function DeviceTracking() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border text-xs text-dim uppercase tracking-wide">
-                {["ID","Название","Группа","Режим","Уставка","Факт Т°","Статус",""].map(h => (
+                {["ID","Название","Группа","Режим","Уставка","Факт Т°","Статус","Вкл/Выкл"].map(h => (
                   <th key={h} className="text-left px-4 py-3 font-medium">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {INDOOR_UNITS.map(u => (
+              {indoor.map(u => (
                 <tr key={u.id} className="border-b border-border/40 hover:bg-surface-2 transition-colors">
                   <td className="px-4 py-3 font-mono text-xs text-dim">{u.id}</td>
                   <td className="px-4 py-3 font-medium">{u.name}</td>
@@ -290,7 +350,13 @@ function DeviceTracking() {
                     <span className={Math.abs(u.curTemp - u.setTemp) > 2 ? "text-amber" : "text-green"}>{u.curTemp}°C</span>
                   </td>
                   <td className="px-4 py-3"><StatusBadge status={u.status} /></td>
-                  <td className="px-4 py-3"><button className="text-xs text-blue hover:underline">Изменить</button></td>
+                  <td className="px-4 py-3">
+                    <ToggleSwitch
+                      on={u.status === "on" || u.status === "warn"}
+                      disabled={u.status === "error"}
+                      onChange={() => toggleIndoor(u.id)}
+                    />
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -756,22 +822,44 @@ function SystemScreen({ screen }: { screen: SubScreen }) {
 }
 
 // ─── Smart View ───────────────────────────────────────────
-function SmartView() {
+function SmartView({ indoor, toggleIndoor, setAllIndoor }: {
+  indoor: IndoorUnit[];
+  toggleIndoor: (id: string) => void;
+  setAllIndoor: (on: boolean) => void;
+}) {
+  const onCount = indoor.filter(u => u.status === "on").length;
   return (
     <div className="animate-fade-in space-y-4">
-      <p className="text-sm text-secondary-color">Управление и блокировка устройств</p>
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-secondary-color">Управление и блокировка устройств · {onCount}/{indoor.length} включено</p>
+        <div className="flex items-center gap-2">
+          <button onClick={() => setAllIndoor(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-green-500/15 text-green-400 border border-green-500/30 hover:bg-green-500/25 transition-all">
+            <Icon name="PowerCircle" size={13} fallback="Power" /> Включить все
+          </button>
+          <button onClick={() => setAllIndoor(false)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium bg-zinc-500/15 text-zinc-400 border border-zinc-500/30 hover:bg-zinc-500/25 transition-all">
+            <Icon name="PowerOff" size={13} fallback="Power" /> Выключить все
+          </button>
+        </div>
+      </div>
       <div className="grid grid-cols-4 md:grid-cols-8 gap-2">
-        {INDOOR_UNITS.map((u) => (
-          <div key={u.id} className={`rounded-lg p-2 panel-border text-center cursor-pointer transition-all hover:scale-105
-            ${u.status === "on" ? "surface-2 border-blue-500/30" :
-              u.status === "warn" ? "surface-2 border-amber-500/30" :
-              u.status === "error" ? "surface-2 border-red-500/30" : "surface-1"}`}>
+        {indoor.map((u) => (
+          <div key={u.id}
+            onClick={() => u.status !== "error" && toggleIndoor(u.id)}
+            title={u.status === "error" ? "Ошибка — управление недоступно" : u.status === "on" ? "Нажмите чтобы выключить" : "Нажмите чтобы включить"}
+            className={`rounded-lg p-2.5 panel-border text-center transition-all select-none
+              ${u.status === "error" ? "opacity-50 cursor-not-allowed surface-1" : "cursor-pointer hover:scale-105 active:scale-95"}
+              ${u.status === "on" ? "surface-2 border-blue-500/40" :
+                u.status === "warn" ? "surface-2 border-amber-500/40" :
+                u.status === "error" ? "surface-1 border-red-500/40" : "surface-1 border-border"}`}>
             <Icon name="Wind" size={18} fallback="Wind" className={`mx-auto ${
               u.status === "on" ? "text-blue" :
               u.status === "warn" ? "text-amber" :
               u.status === "error" ? "text-red" : "text-dim"}`} />
             <div className="text-xs mt-1 text-dim truncate">{u.id}</div>
             <div className="font-mono text-xs mt-0.5">{u.status === "on" ? `${u.curTemp}°` : "—"}</div>
+            <div className={`mt-1.5 w-4 h-1.5 rounded-full mx-auto ${u.status === "on" ? "bg-blue-500" : u.status === "error" ? "bg-red-500" : "bg-zinc-600"}`} />
           </div>
         ))}
       </div>
@@ -797,6 +885,44 @@ export default function Index() {
   const [activeScreen, setActiveScreen] = useState<SubScreen>("");
   const [sidebarOpen, setSidebarOpen] = useState(true);
 
+  // ── Device state ─────────────────────────────────────
+  const [outdoor, setOutdoor] = useState<OutdoorUnit[]>(INIT_OUTDOOR);
+  const [indoor, setIndoor] = useState<IndoorUnit[]>(INIT_INDOOR);
+
+  const toggleOutdoor = useCallback((id: string) => {
+    setOutdoor(prev => prev.map(u => {
+      if (u.id !== id || u.status === "error") return u;
+      const next = u.status === "off" ? "on" : "off";
+      return { ...u, status: next, mode: next === "on" ? "Охлаждение" : "Стоп" };
+    }));
+  }, []);
+
+  const toggleIndoor = useCallback((id: string) => {
+    setIndoor(prev => prev.map(u => {
+      if (u.id !== id || u.status === "error") return u;
+      const next = u.status === "off" ? "on" : "off";
+      return { ...u, status: next, mode: next === "on" ? "Охл." : "Стоп" };
+    }));
+  }, []);
+
+  const setAllOutdoor = useCallback((on: boolean) => {
+    setOutdoor(prev => prev.map(u => {
+      if (u.status === "error") return u;
+      return { ...u, status: on ? "on" : "off", mode: on ? "Охлаждение" : "Стоп" };
+    }));
+  }, []);
+
+  const setAllIndoor = useCallback((on: boolean) => {
+    setIndoor(prev => prev.map(u => {
+      if (u.status === "error") return u;
+      return { ...u, status: on ? "on" : "off", mode: on ? "Охл." : "Стоп" };
+    }));
+  }, []);
+
+  const allOutdoorOn = outdoor.filter(u => u.status !== "error").every(u => u.status === "on");
+  const allIndoorOn = indoor.filter(u => u.status !== "error").every(u => u.status === "on");
+  // ─────────────────────────────────────────────────────
+
   const now = new Date();
   const timeStr = now.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
   const dateStr = now.toLocaleDateString("ru-RU", { day: "2-digit", month: "long", year: "numeric" });
@@ -810,11 +936,20 @@ export default function Index() {
   }
 
   function renderContent() {
-    if (activeModule === "dashboard") return <Dashboard />;
+    if (activeModule === "dashboard") return <Dashboard outdoor={outdoor} indoor={indoor} />;
     if (activeModule === "devices") {
-      if (activeScreen === "tracking") return <DeviceTracking />;
+      if (activeScreen === "tracking") return (
+        <DeviceTracking
+          outdoor={outdoor} indoor={indoor}
+          toggleOutdoor={toggleOutdoor} toggleIndoor={toggleIndoor}
+          allOutdoorOn={allOutdoorOn} allIndoorOn={allIndoorOn}
+          setAllOutdoor={setAllOutdoor} setAllIndoor={setAllIndoor}
+        />
+      );
       if (activeScreen === "groups") return <GroupSettings />;
-      if (activeScreen === "smartview") return <SmartView />;
+      if (activeScreen === "smartview") return (
+        <SmartView indoor={indoor} toggleIndoor={toggleIndoor} setAllIndoor={setAllIndoor} />
+      );
       if (activeScreen === "schedule") return <ScheduleScreen />;
       if (activeScreen === "advanced") return <AdvancedScreen />;
     }
@@ -901,11 +1036,11 @@ export default function Index() {
             <div className="flex items-center gap-4 text-xs text-secondary-color">
               <span className="flex items-center gap-1.5">
                 <span className="status-dot bg-green-400 animate-pulse-slow" />
-                48 систем онлайн
+                {indoor.filter(u => u.status === "on").length + outdoor.filter(u => u.status === "on").length} систем онлайн
               </span>
               <span className="flex items-center gap-1.5">
                 <span className="status-dot bg-red-400" />
-                1 ошибка
+                {[...indoor, ...outdoor].filter(u => u.status === "error").length} ошибок
               </span>
             </div>
             <div className="text-right">
